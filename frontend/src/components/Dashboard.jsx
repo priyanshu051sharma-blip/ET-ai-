@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import Header from './Header';
 import MetricCard from './MetricCard';
 import Chart from './Chart';
@@ -10,21 +11,23 @@ import SensorHealthMonitor from './SensorHealthMonitor';
 import AdminPanel from './AdminPanel';
 import ChatWidget from './ChatWidget';
 import MlSandbox from './MlSandbox';
-import axios from 'axios';
+import Globe3D from './Globe3D';
 import {
-  fetchLocations,
-  fetchLatestReadings,
-  fetchSummary,
-  fetchForecast,
-  fetchSourceAnalysis,
-  fetchRecommendations,
-  fetchSensorHealth,
-  fetchAiInsights,
-  sendChatMessage
+  fetchLocations, fetchLatestReadings, fetchSummary,
+  fetchForecast, fetchSourceAnalysis, fetchRecommendations,
+  fetchSensorHealth, fetchAiInsights, sendChatMessage
 } from '../data/api';
 
-export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'sandbox' | 'analytics' | 'telemetry' | 'safety'
+const TABS = [
+  { id: 'overview',   label: 'Overview & GIS',     icon: '🌍' },
+  { id: 'sandbox',    label: 'ML Sandbox',          icon: '🧠' },
+  { id: 'analytics',  label: 'Telemetry Analytics', icon: '📊' },
+  { id: 'telemetry',  label: 'Sensor Database',     icon: '🎛️' },
+  { id: 'safety',     label: 'Safety & Controls',   icon: '🚨' },
+];
+
+export default function Dashboard({ onGoHome }) {
+  const [activeTab, setActiveTab] = useState('overview');
   const [locations, setLocations] = useState([]);
   const [selectedLocation, setSelectedLocation] = useState('Sector A');
   const [readings, setReadings] = useState([]);
@@ -34,11 +37,8 @@ export default function Dashboard() {
   const [recommendations, setRecommendations] = useState([]);
   const [sensorHealth, setSensorHealth] = useState(null);
   const [aiInsights, setAiInsights] = useState([]);
-  
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  
-  // Embedding ChatWidget state in the dashboard grid
   const [embeddedChat, setEmbeddedChat] = useState([
     { role: 'assistant', text: 'Ask me anything about EcoSphere\'s monitored sectors, AI forecasts, or active alerts.' }
   ]);
@@ -49,75 +49,53 @@ export default function Dashboard() {
 
   const loadNetworkData = async () => {
     try {
-      const locRes = await fetchLocations();
+      const [locRes, healthRes, insightsRes] = await Promise.all([
+        fetchLocations(), fetchSensorHealth(), fetchAiInsights()
+      ]);
       setLocations(locRes.locations);
-      
-      const healthRes = await fetchSensorHealth();
       setSensorHealth(healthRes);
-      
-      const insightsRes = await fetchAiInsights();
       setAiInsights(insightsRes);
     } catch (err) {
-      console.error("Error fetching network metadata:", err);
-      setError('Cannot connect to the backend server. Please verify FastAPI is running on port 8000.');
+      setError('Cannot connect to the backend server. Verify FastAPI is running on port 8000.');
     }
   };
 
-  const loadLocationSpecificData = async (loc) => {
-    try {
-      const [latestReadings, dataSummary, forecastData, sourceAnalysis, recsList] = await Promise.all([
-        fetchLatestReadings(loc),
-        fetchSummary(loc),
-        fetchForecast(loc),
-        fetchSourceAnalysis(loc),
-        fetchRecommendations(loc)
-      ]);
-      
-      setReadings(latestReadings);
-      setSummary(dataSummary);
-      setForecast(forecastData);
-      setSourceData(sourceAnalysis);
-      setRecommendations(recsList);
-    } catch (err) {
-      console.error(`Error loading details for location ${loc}:`, err);
-    }
+  const loadLocationData = async (loc) => {
+    const [latestReadings, dataSummary, forecastData, sourceAnalysis, recsList] = await Promise.all([
+      fetchLatestReadings(loc), fetchSummary(loc), fetchForecast(loc),
+      fetchSourceAnalysis(loc), fetchRecommendations(loc)
+    ]);
+    setReadings(latestReadings);
+    setSummary(dataSummary);
+    setForecast(forecastData);
+    setSourceData(sourceAnalysis);
+    setRecommendations(recsList);
   };
 
   const initLoad = async () => {
     setLoading(true);
     await loadNetworkData();
-    await loadLocationSpecificData(selectedLocation);
+    await loadLocationData(selectedLocation);
     setLoading(false);
   };
 
   useEffect(() => {
     initLoad();
-    // Poll updates every 8 seconds
     const interval = setInterval(() => {
       loadNetworkData();
-      loadLocationSpecificData(selectedLocation);
+      loadLocationData(selectedLocation);
     }, 8000);
     return () => clearInterval(interval);
   }, [selectedLocation]);
 
-  const handleLocationChange = (loc) => {
-    setSelectedLocation(loc);
-  };
-
-  const handleConfigChange = () => {
-    // Admin config toggled, reload location details immediately
-    loadNetworkData();
-    loadLocationSpecificData(selectedLocation);
-  };
+  const handleConfigChange = () => { loadNetworkData(); loadLocationData(selectedLocation); };
 
   const handleEmbeddedChatSend = async () => {
     const text = chatInput.trim();
     if (!text || chatLoading) return;
-    
     setEmbeddedChat(prev => [...prev, { role: 'user', text }]);
     setChatInput('');
     setChatLoading(true);
-    
     try {
       const reply = await sendChatMessage(text, selectedLocation);
       setEmbeddedChat(prev => [...prev, { role: 'assistant', text: reply }]);
@@ -128,100 +106,79 @@ export default function Dashboard() {
     }
   };
 
-  const handleReportDownload = (reportType, format) => {
-    // Triggers report download directly from FastAPI endpoint
-    const url = `${API_BASE}/api/reports/generate?type=${reportType}&format=${format}&location=${encodeURIComponent(selectedLocation)}`;
-    window.open(url, '_blank');
-  };
-
-  // Compile active alerts checklist dynamically from monitored locations
   const activeAlerts = [];
   locations.forEach(loc => {
-    if (loc.aqi_color === 'red') {
-      activeAlerts.push({
-        id: `aqi-crit-${loc.name}`,
-        type: 'Critical',
-        msg: `Critical AQI exceeded 200 (${loc.current_aqi}) at ${loc.name}.`
-      });
-    } else if (loc.aqi_color === 'orange') {
-      activeAlerts.push({
-        id: `aqi-warn-${loc.name}`,
-        type: 'Warning',
-        msg: `PM2.5 / PM10 above WHO limits at ${loc.name}.`
-      });
-    }
-    if (loc.water_status === 'Unsafe/Contaminated') {
-      activeAlerts.push({
-        id: `wqi-crit-${loc.name}`,
-        type: 'Critical',
-        msg: `Reservoir contamination detected at ${loc.name} WQI (${loc.current_wqi}).`
-      });
-    }
-    if (loc.sensor_status === 'OFFLINE') {
-      activeAlerts.push({
-        id: `sen-off-${loc.name}`,
-        type: 'Warning',
-        msg: `IoT Sensor Core offline at ${loc.name}.`
-      });
-    }
+    if (loc.aqi_color === 'red')
+      activeAlerts.push({ id: `aqi-crit-${loc.name}`, type: 'Critical', msg: `Critical AQI ${loc.current_aqi} at ${loc.name}` });
+    else if (loc.aqi_color === 'orange')
+      activeAlerts.push({ id: `aqi-warn-${loc.name}`, type: 'Warning', msg: `AQI elevated at ${loc.name}` });
+    if (loc.water_status === 'Unsafe/Contaminated')
+      activeAlerts.push({ id: `wqi-crit-${loc.name}`, type: 'Critical', msg: `Water contamination at ${loc.name} (WQI ${loc.current_wqi})` });
+    if (loc.sensor_status === 'OFFLINE')
+      activeAlerts.push({ id: `sen-off-${loc.name}`, type: 'Warning', msg: `Sensor offline at ${loc.name}` });
   });
 
-  /* ── Loading ── */
+  // ── Loading screen ──
   if (loading) {
     return (
       <div style={{
-        minHeight: '100vh',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        flexDirection: 'column', gap: '16px',
-        backgroundColor: '#0F172A',
-        color: '#94A3B8',
-        fontFamily: 'var(--font-sans)',
+        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flexDirection: 'column', gap: '32px',
+        background: 'transparent',
       }}>
-        <div style={{
-          width: '42px', height: '42px',
-          border: '3px solid #1E293B',
-          borderTopColor: '#38BDF8',
-          borderRadius: '50%',
-          animation: 'spin 0.8s linear infinite',
-        }} />
-        <div style={{ fontSize: '15px', fontWeight: '600' }}>Booting EcoSphere AI Platform…</div>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <Globe3D size={260} />
+        <div style={{ textAlign: 'center' }}>
+          <motion.div
+            animate={{ opacity: [0.5, 1, 0.5] }}
+            transition={{ duration: 2, repeat: Infinity }}
+            style={{ fontSize: '18px', fontWeight: '700', color: '#38BDF8', marginBottom: '8px' }}
+          >
+            EcoSphere AI
+          </motion.div>
+          <div style={{ fontSize: '13px', color: '#475569' }}>Booting Environmental Intelligence Platform…</div>
+          <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', marginTop: '16px' }}>
+            {[0,1,2].map(i => (
+              <motion.div key={i}
+                animate={{ scale: [0.6, 1, 0.6], opacity: [0.3, 1, 0.3] }}
+                transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.2 }}
+                style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#38BDF8' }}
+              />
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
 
-  /* ── Error ── */
+  // ── Error screen ──
   if (error) {
     return (
       <div style={{
-        maxWidth: '480px', margin: '120px auto',
-        padding: '24px',
-        backgroundColor: '#1E293B',
-        border: '1px solid #334155',
-        borderLeft: '4px solid #EF4444',
-        borderRadius: '12px',
-        fontFamily: 'var(--font-sans)',
-        color: '#F8FAFC'
+        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: '#020817',
       }}>
-        <div style={{ fontWeight: '700', color: '#EF4444', marginBottom: '8px', fontSize: '16px' }}>
-          ⚠️ Core API Connection Error
-        </div>
-        <p style={{ fontSize: '13px', color: '#94A3B8', marginBottom: '16px' }}>
-          {error}
-        </p>
-        <button
-          onClick={initLoad}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
           style={{
-            padding: '8px 16px', fontSize: '13px', fontWeight: '700',
-            border: 'none', borderRadius: '6px', cursor: 'pointer',
-            backgroundColor: '#38BDF8', color: '#0F172A',
-            transition: 'background-color 0.15s',
+            maxWidth: '440px', padding: '32px',
+            background: 'rgba(30,41,59,0.9)',
+            border: '1px solid rgba(239,68,68,0.3)',
+            borderLeft: '4px solid #EF4444',
+            borderRadius: '16px',
+            backdropFilter: 'blur(16px)',
           }}
-          onMouseOver={e => e.currentTarget.style.backgroundColor = '#0ea5e9'}
-          onMouseOut={e => e.currentTarget.style.backgroundColor = '#38BDF8'}
         >
-          Re-Establish Link
-        </button>
+          <div style={{ fontWeight: '700', color: '#EF4444', marginBottom: '8px', fontSize: '16px' }}>⚠️ Core API Error</div>
+          <p style={{ fontSize: '13px', color: '#94A3B8', marginBottom: '20px' }}>{error}</p>
+          <button onClick={initLoad} style={{
+            padding: '10px 20px', fontSize: '13px', fontWeight: '700',
+            border: 'none', borderRadius: '8px', cursor: 'pointer',
+            background: 'linear-gradient(135deg, #38BDF8, #0ea5e9)', color: '#0F172A',
+          }}>
+            Reconnect
+          </button>
+        </motion.div>
       </div>
     );
   }
@@ -229,518 +186,414 @@ export default function Dashboard() {
   const latestReading = readings[readings.length - 1] ?? null;
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#F1F5F9', fontFamily: 'var(--font-sans)', display: 'flex', flexDirection: 'column' }}>
-      {/* Header Panel */}
-      <Header 
+    <div style={{ minHeight: '100vh', background: 'transparent', fontFamily: 'var(--font-sans)', display: 'flex', flexDirection: 'column', isolation: 'isolate' }}>
+      <Header
         lastUpdated={latestReading?.timestamp}
         selectedLocation={selectedLocation}
-        onSelectLocation={handleLocationChange}
+        onSelectLocation={setSelectedLocation}
         locations={locations}
         activeAlertsCount={activeAlerts.length}
+        onGoHome={onGoHome}
+        sensorHealth={sensorHealth}
       />
 
       <div style={{ display: 'flex', flex: 1, position: 'relative' }}>
-        {/* Left Sidebar */}
+        {/* Sidebar */}
         <aside style={{
-          width: '240px',
-          backgroundColor: '#0F172A',
-          color: '#fff',
-          borderRight: '1px solid #1E293B',
-          padding: '24px 16px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '8px',
-          flexShrink: 0
+          width: '220px', flexShrink: 0,
+          background: 'linear-gradient(180deg, #020c1b 0%, #050f1e 100%)',
+          borderRight: '1px solid rgba(56,189,248,0.08)',
+          padding: '20px 12px',
+          display: 'flex', flexDirection: 'column', gap: '4px',
+          height: 'calc(100vh - 64px)',
+          overflowY: 'auto',
         }}>
-          <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748B', paddingLeft: '8px', marginBottom: '8px', letterSpacing: '0.05em' }}>
-            Workspaces
+          <div style={{ fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', color: '#334155', paddingLeft: '10px', marginBottom: '8px', letterSpacing: '0.1em' }}>
+            Navigation
           </div>
-          {[
-            { id: 'overview', label: '🌍 Overview & GIS Map' },
-            { id: 'sandbox', label: '🧠 ML Model Sandbox' },
-            { id: 'analytics', label: '📊 Telemetry Analytics' },
-            { id: 'telemetry', label: '🎛️ Sensor Database' },
-            { id: 'safety', label: '🚨 Safety & Controls' }
-          ].map(tab => (
-            <button
+          {TABS.map(tab => (
+            <motion.button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
+              whileHover={{ x: 4 }}
+              whileTap={{ scale: 0.98 }}
               style={{
-                width: '100%',
-                textAlign: 'left',
-                padding: '10px 14px',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontSize: '13px',
-                fontWeight: '600',
-                transition: 'all 0.15s',
-                backgroundColor: activeTab === tab.id ? '#1E293B' : 'transparent',
-                color: activeTab === tab.id ? '#38BDF8' : '#94A3B8',
-              }}
-              onMouseOver={e => {
-                if (activeTab !== tab.id) {
-                  e.target.style.backgroundColor = '#1E293B';
-                  e.target.style.color = '#F8FAFC';
-                }
-              }}
-              onMouseOut={e => {
-                if (activeTab !== tab.id) {
-                  e.target.style.backgroundColor = 'transparent';
-                  e.target.style.color = '#94A3B8';
-                }
+                width: '100%', textAlign: 'left',
+                padding: '10px 12px', border: 'none', borderRadius: '10px',
+                cursor: 'pointer', fontSize: '12px', fontWeight: '600',
+                background: activeTab === tab.id ? 'rgba(56,189,248,0.12)' : 'transparent',
+                color: activeTab === tab.id ? '#38BDF8' : '#64748B',
+                borderLeft: activeTab === tab.id ? '2px solid #38BDF8' : '2px solid transparent',
+                transition: 'color 0.15s, background 0.15s',
+                display: 'flex', alignItems: 'center', gap: '8px',
               }}
             >
-              {tab.label}
-            </button>
+              <span>{tab.icon}</span> {tab.label}
+            </motion.button>
           ))}
 
-          {/* Collateral system health summary in sidebar */}
-          <div style={{ marginTop: 'auto', borderTop: '1px solid #1E293B', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <div style={{ fontSize: '10px', color: '#64748B', fontWeight: 700 }}>SYSTEM STATUS</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#10B981' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10B981', display: 'inline-block' }} />
-              API: 127.0.0.1 (Live)
+          {/* System status */}
+          <div style={{ marginTop: 'auto', borderTop: '1px solid rgba(255,255,255,0.04)', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ fontSize: '9px', color: '#334155', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.1em' }}>System</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#10B981' }}>
+              <motion.span animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 2, repeat: Infinity }}
+                style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#10B981', boxShadow: '0 0 6px #10B981' }}
+              />
+              API Connected
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: activeAlerts.length > 0 ? '#EF4444' : '#10B981' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: activeAlerts.length > 0 ? '#EF4444' : '#10B981', display: 'inline-block' }} />
-              {activeAlerts.length > 0 ? `${activeAlerts.length} Active Alert(s)` : 'Systems Nominal'}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: activeAlerts.length > 0 ? '#EF4444' : '#10B981' }}>
+              <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: activeAlerts.length > 0 ? '#EF4444' : '#10B981' }} />
+              {activeAlerts.length > 0 ? `${activeAlerts.length} Alert(s)` : 'Nominal'}
+            </div>
+            <div style={{ fontSize: '10px', color: '#334155', marginTop: '4px' }}>
+              {locations.length} sectors monitored
             </div>
           </div>
         </aside>
 
-        {/* Main Content Workspace */}
-        <main style={{ flex: 1, padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px', overflowY: 'auto', maxHeight: 'calc(100vh - 70px)' }}>
-          
-          {/* KPI TOP METRICS CARDS (Always visible at the top of every tab, providing continuous situational awareness) */}
+        {/* Main workspace */}
+        <main style={{ flex: 1, padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px', overflowY: 'auto', height: 'calc(100vh - 64px)', background: 'transparent', position: 'relative' }}>
+
+          {/* KPI Row */}
           {latestReading && summary && (
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-              gap: '16px'
-            }}>
-              <MetricCard
-                label="Overall Eco Score"
-                value={summary.environmental_score}
-                unit="/100"
-                status={summary.environmental_score >= 75 ? 'SAFE' : 'UNSAFE'}
-                min={75}
-              />
-              <MetricCard
-                label="Air Quality (AQI)"
-                value={latestReading.AQI}
-                unit=""
-                status={latestReading.AQI <= 100 ? 'SAFE' : 'UNSAFE'}
-                max={100}
-              />
-              <MetricCard
-                label="Water Quality"
-                value={latestReading.WQI}
-                unit=""
-                status={latestReading.water_status === 'SAFE' ? 'SAFE' : 'UNSAFE'}
-                min={70}
-              />
-              <MetricCard
-                label="Air Temp"
-                value={latestReading.air_temperature}
-                unit="°C"
-                status="SAFE"
-              />
-              <MetricCard
-                label="Humidity"
-                value={latestReading.humidity}
-                unit="%"
-                status="SAFE"
-              />
-              <MetricCard
-                label="Active Alerts"
-                value={activeAlerts.length}
-                unit="logs"
-                status={activeAlerts.length === 0 ? 'SAFE' : 'UNSAFE'}
-                max={0}
-              />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(155px, 1fr))', gap: '12px' }}>
+              <MetricCard label="Eco Score" value={summary.environmental_score} unit="/100" status={summary.environmental_score >= 75 ? 'SAFE' : 'UNSAFE'} min={75} />
+              <MetricCard label="Air Quality (AQI)" value={latestReading.AQI} unit="" status={latestReading.AQI <= 100 ? 'SAFE' : 'UNSAFE'} max={100} />
+              <MetricCard label="Water Quality" value={latestReading.WQI} unit="" status={latestReading.water_status === 'SAFE' ? 'SAFE' : 'UNSAFE'} min={70} />
+              <MetricCard label="Air Temp" value={latestReading.air_temperature} unit="°C" status="SAFE" />
+              <MetricCard label="Humidity" value={latestReading.humidity} unit="%" status="SAFE" />
+              <MetricCard label="Active Alerts" value={activeAlerts.length} unit="" status={activeAlerts.length === 0 ? 'SAFE' : 'UNSAFE'} max={0} />
             </div>
           )}
 
-          {/* RENDER ACTIVE TAB */}
-          {activeTab === 'overview' && (
-            <div style={{ display: 'grid', gridTemplateColumns: '7fr 3fr', gap: '24px', flexWrap: 'wrap' }}>
-              {/* Interactive GIS map */}
-              <GisMap 
-                locations={locations} 
-                selectedLocation={selectedLocation} 
-                onSelectLocation={handleLocationChange} 
-              />
+          {/* Tab content */}
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.3 }}
+            >
 
-              {/* Embedded AI Assistant Chat Panel */}
-              <div style={{
-                backgroundColor: '#fff',
-                border: '1px solid var(--color-border)',
-                borderRadius: '12px',
-                boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
-                display: 'flex',
-                flexDirection: 'column',
-                overflow: 'hidden',
-                height: '520px',
-              }}>
-                <div style={{ backgroundColor: '#0F172A', color: '#fff', padding: '14px 16px', borderBottom: '1px solid #1E293B', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span>🤖</span>
-                  <div>
-                    <div style={{ fontSize: '13px', fontWeight: '700' }}>AI assistant console</div>
-                    <div style={{ fontSize: '9px', color: '#94A3B8' }}>Inquiry desk for {selectedLocation}</div>
-                  </div>
-                </div>
-                
-                <div style={{ flex: 1, overflowY: 'auto', padding: '16px', backgroundColor: '#F8FAFC', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {embeddedChat.map((msg, idx) => (
-                    <div key={idx} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
-                      <div style={{
-                        maxWidth: '85%',
-                        backgroundColor: msg.role === 'user' ? '#0F172A' : '#fff',
-                        color: msg.role === 'user' ? '#fff' : 'var(--color-text-primary)',
-                        padding: '8px 12px',
-                        borderRadius: '8px',
-                        fontSize: '12.5px',
-                        lineHeight: '1.5',
-                        border: msg.role === 'assistant' ? '1px solid var(--color-border)' : 'none',
-                      }}>
-                        {msg.text}
+              {/* ── OVERVIEW TAB ── */}
+              {activeTab === 'overview' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '7fr 3fr', gap: '20px' }}>
+                  <GisMap locations={locations} selectedLocation={selectedLocation} onSelectLocation={setSelectedLocation} />
+
+                  {/* Globe + AI Chat panel */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    {/* 3D Globe widget */}
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      style={{
+                        background: 'radial-gradient(ellipse at 50% 50%, rgba(10,22,40,0.95), rgba(2,8,23,0.98))',
+                        border: '1px solid rgba(56,189,248,0.15)',
+                        borderRadius: '16px',
+                        padding: '16px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: '10px',
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+                      }}
+                    >
+                      <div style={{ fontSize: '11px', fontWeight: '700', color: '#38BDF8', textTransform: 'uppercase', letterSpacing: '0.1em', alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#38BDF8', boxShadow: '0 0 8px #38BDF8', display: 'inline-block' }} />
+                        Global Environmental Twin
+                      </div>
+                      <Globe3D size={220} />
+                      <div style={{ fontSize: '10px', color: '#334155', textAlign: 'center' }}>
+                        Real-time geospatial telemetry layer
+                      </div>
+                    </motion.div>
+
+                    {/* Embedded AI Chat */}
+                    <div style={{
+                      background: 'linear-gradient(135deg, rgba(15,23,42,0.98), rgba(30,41,59,0.95))',
+                      border: '1px solid rgba(56,189,248,0.12)',
+                      borderRadius: '16px',
+                      overflow: 'hidden',
+                      display: 'flex', flexDirection: 'column',
+                      flex: 1, minHeight: '240px',
+                      boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                    }}>
+                      <div style={{ background: 'rgba(56,189,248,0.06)', borderBottom: '1px solid rgba(56,189,248,0.12)', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>🤖</span>
+                        <div>
+                          <div style={{ fontSize: '12px', fontWeight: '700', color: '#F8FAFC' }}>AI Assistant</div>
+                          <div style={{ fontSize: '9px', color: '#475569' }}>Monitoring {selectedLocation}</div>
+                        </div>
+                      </div>
+                      <div style={{ flex: 1, overflowY: 'auto', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {embeddedChat.map((msg, idx) => (
+                          <motion.div key={idx} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+                            style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                            <div style={{
+                              maxWidth: '88%', padding: '8px 12px', borderRadius: '10px', fontSize: '12px', lineHeight: 1.5,
+                              background: msg.role === 'user' ? 'rgba(56,189,248,0.2)' : 'rgba(255,255,255,0.05)',
+                              color: msg.role === 'user' ? '#38BDF8' : '#94A3B8',
+                              border: `1px solid ${msg.role === 'user' ? 'rgba(56,189,248,0.3)' : 'rgba(255,255,255,0.06)'}`,
+                            }}>
+                              {msg.text}
+                            </div>
+                          </motion.div>
+                        ))}
+                        {chatLoading && (
+                          <div style={{ display: 'flex', gap: '4px', padding: '8px' }}>
+                            {[0,1,2].map(i => (
+                              <motion.div key={i} animate={{ y: [0, -4, 0] }} transition={{ duration: 0.8, repeat: Infinity, delay: i * 0.15 }}
+                                style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#38BDF8' }} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ padding: '10px', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', gap: '8px' }}>
+                        <input type="text" placeholder="Ask about readings…" value={chatInput}
+                          onChange={e => setChatInput(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && handleEmbeddedChatSend()}
+                          style={{ flex: 1, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', padding: '7px 12px', fontSize: '12px', color: '#fff', outline: 'none' }}
+                        />
+                        <button onClick={handleEmbeddedChatSend} disabled={chatLoading || !chatInput.trim()}
+                          style={{ padding: '7px 14px', fontSize: '12px', fontWeight: '700', border: 'none', borderRadius: '8px', cursor: 'pointer', background: chatInput.trim() ? '#38BDF8' : 'rgba(255,255,255,0.1)', color: chatInput.trim() ? '#0F172A' : '#475569', transition: 'all 0.15s' }}>
+                          →
+                        </button>
                       </div>
                     </div>
-                  ))}
-                  {chatLoading && (
-                    <div style={{ display: 'flex', gap: '4px', alignSelf: 'flex-start', backgroundColor: '#fff', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--color-border)' }}>
-                      <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#64748B', display: 'inline-block', animation: 'dot-bounce 1.2s infinite' }} />
-                      <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#64748B', display: 'inline-block', animation: 'dot-bounce 1.2s infinite 0.2s' }} />
-                      <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#64748B', display: 'inline-block', animation: 'dot-bounce 1.2s infinite 0.4s' }} />
+                  </div>
+                </div>
+              )}
+
+              {/* ── SANDBOX TAB ── */}
+              {activeTab === 'sandbox' && (
+                <MlSandbox selectedLocation={selectedLocation} currentTelemetry={latestReading} />
+              )}
+
+              {/* ── ANALYTICS TAB ── */}
+              {activeTab === 'analytics' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                  {readings.length > 0 && forecast.length > 0 && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px' }}>
+                      <Chart defaultTab="air" historicalData={readings} locationName={selectedLocation} />
+                      <Chart defaultTab="water" historicalData={readings} locationName={selectedLocation} />
+                      <Chart defaultTab="forecast" forecastData={forecast} locationName={selectedLocation} />
                     </div>
                   )}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                    <SourceAnalysis data={sourceData.sources} explanation={sourceData.explanation} />
+                    <RecommendationsList recommendations={recommendations} />
+                  </div>
                 </div>
+              )}
 
-                <div style={{ padding: '10px 16px', borderTop: '1px solid var(--color-border)', display: 'flex', gap: '8px', backgroundColor: '#fff' }}>
-                  <input
-                    type="text"
-                    placeholder="Ask about AQI, WQI, or forecasts..."
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleEmbeddedChatSend()}
+              {/* ── TELEMETRY TAB ── */}
+              {activeTab === 'telemetry' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '20px' }}>
+                    {/* Reports */}
+                    <motion.div
+                      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+                      style={{
+                        background: 'linear-gradient(135deg, rgba(15,23,42,0.98), rgba(30,41,59,0.95))',
+                        border: '1px solid rgba(56,189,248,0.12)',
+                        borderRadius: '16px', padding: '24px',
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                        display: 'flex', flexDirection: 'column', gap: '14px',
+                      }}
+                    >
+                      <div style={{ fontSize: '14px', fontWeight: '700', color: '#F8FAFC', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: '#38BDF8', boxShadow: '0 0 8px #38BDF8' }} />
+                        Reports Console
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        {['📥 Export CSV','📄 PDF Report'].map((label, i) => (
+                          <motion.button key={i} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                            style={{ padding: '10px', background: 'rgba(56,189,248,0.08)', border: '1px solid rgba(56,189,248,0.2)', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '700', color: '#38BDF8' }}>
+                            {label}
+                          </motion.button>
+                        ))}
+                      </div>
+                      {[
+                        { title: 'Weekly Operational Audit', desc: '24h avg threshold summary' },
+                        { title: 'Monthly ESG Scorecard', desc: 'SDG carbon footprint rates' },
+                        { title: 'EPA Regulatory Compliance', desc: 'pH, TDS & PM verification' },
+                      ].map((rep, i) => (
+                        <motion.div key={i} whileHover={{ x: 4 }}
+                          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '8px', padding: '10px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div>
+                            <div style={{ fontSize: '12px', fontWeight: '700', color: '#F8FAFC' }}>{rep.title}</div>
+                            <div style={{ fontSize: '10px', color: '#475569', marginTop: '2px' }}>{rep.desc}</div>
+                          </div>
+                          <span style={{ color: '#38BDF8', fontSize: '14px' }}>⚡</span>
+                        </motion.div>
+                      ))}
+                    </motion.div>
+                    {sensorHealth && <SensorHealthMonitor data={sensorHealth} />}
+                  </div>
+
+                  {/* Raw data table */}
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
                     style={{
-                      flex: 1,
-                      backgroundColor: '#F8FAFC',
-                      border: '1px solid var(--color-border)',
-                      borderRadius: '8px',
-                      padding: '8px 12px',
-                      fontSize: '13px',
-                      outline: 'none',
-                    }}
-                  />
-                  <button
-                    onClick={handleEmbeddedChatSend}
-                    disabled={chatLoading || !chatInput.trim()}
-                    style={{
-                      padding: '6px 14px',
-                      fontSize: '12px',
-                      fontWeight: '700',
-                      border: 'none',
-                      borderRadius: '8px',
-                      cursor: chatInput.trim() ? 'pointer' : 'not-allowed',
-                      backgroundColor: chatInput.trim() ? '#0F172A' : '#94A3B8',
-                      color: '#fff',
+                      background: 'linear-gradient(135deg, rgba(15,23,42,0.98), rgba(30,41,59,0.95))',
+                      border: '1px solid rgba(56,189,248,0.12)',
+                      borderRadius: '16px', padding: '24px',
+                      boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
                     }}
                   >
-                    Send
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'sandbox' && (
-            <MlSandbox 
-              selectedLocation={selectedLocation} 
-              currentTelemetry={latestReading} 
-            />
-          )}
-
-          {activeTab === 'analytics' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-              {/* LINE TRENDS & PREDICTIVE FORECASTS ROW */}
-              {readings.length > 0 && forecast.length > 0 && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '24px' }}>
-                  <Chart defaultTab="air" historicalData={readings} locationName={selectedLocation} />
-                  <Chart defaultTab="water" historicalData={readings} locationName={selectedLocation} />
-                  <Chart defaultTab="forecast" forecastData={forecast} locationName={selectedLocation} />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                      <div>
+                        <div style={{ fontSize: '14px', fontWeight: '700', color: '#F8FAFC', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: '#38BDF8', boxShadow: '0 0 8px #38BDF8' }} />
+                          Historical Telemetry Logger
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#475569', marginTop: '2px' }}>Raw sensor data logs — last 15 records</div>
+                      </div>
+                      <span style={{ fontSize: '10px', background: 'rgba(56,189,248,0.08)', color: '#38BDF8', padding: '4px 10px', borderRadius: '6px', fontFamily: 'monospace', border: '1px solid rgba(56,189,248,0.15)' }}>
+                        {readings.length} records
+                      </span>
+                    </div>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                            {['Timestamp','AQI','PM2.5','PM10','WQI','pH','TDS','DO','Turbidity'].map(h => (
+                              <th key={h} style={{ padding: '10px 12px', fontWeight: '600', color: '#475569', textAlign: 'left', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {readings.slice(-15).reverse().map((r, idx) => (
+                            <motion.tr key={idx}
+                              initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: idx * 0.03 }}
+                              style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}
+                            >
+                              <td style={{ padding: '9px 12px', fontFamily: 'monospace', fontSize: '10px', color: '#475569' }}>{new Date(r.timestamp).toLocaleString()}</td>
+                              <td style={{ padding: '9px 12px', fontWeight: '700', color: r.AQI > 100 ? '#EF4444' : '#34D399' }}>{r.AQI}</td>
+                              <td style={{ padding: '9px 12px', color: '#94A3B8' }}>{r.PM25}</td>
+                              <td style={{ padding: '9px 12px', color: '#94A3B8' }}>{r.PM10}</td>
+                              <td style={{ padding: '9px 12px', fontWeight: '700', color: r.water_status === 'UNSAFE' ? '#EF4444' : '#34D399' }}>{r.WQI}</td>
+                              <td style={{ padding: '9px 12px', color: '#94A3B8' }}>{r.pH}</td>
+                              <td style={{ padding: '9px 12px', color: '#94A3B8' }}>{r.TDS}</td>
+                              <td style={{ padding: '9px 12px', color: '#94A3B8' }}>{r.DO}</td>
+                              <td style={{ padding: '9px 12px', color: '#94A3B8' }}>{r.turbidity}</td>
+                            </motion.tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </motion.div>
                 </div>
               )}
 
-              {/* SOURCE ANALYSIS & MITIGATION ROW */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
-                <SourceAnalysis data={sourceData.sources} explanation={sourceData.explanation} />
-                <RecommendationsList recommendations={recommendations} />
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'telemetry' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-              {/* Report Exporter Row */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '24px' }}>
-                {/* Reports Console */}
-                <div style={{
-                  backgroundColor: '#fff',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: '12px',
-                  padding: '20px',
-                  boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '16px',
-                  minHeight: '340px',
-                  justifyContent: 'space-between'
-                }}>
-                  <div>
-                    <div style={{ fontSize: '15px', fontWeight: '700', color: 'var(--color-text-primary)' }}>
-                      🖨 Environmental Reports Console
-                    </div>
-                    <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
-                      Auto-generate compliance reporting audits
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', flex: 1, justifyContent: 'center' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                      <button
-                        onClick={() => handleReportDownload('weekly', 'csv')}
-                        style={{ padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', cursor: 'pointer', backgroundColor: '#fff', fontSize: '12px', fontWeight: '600' }}
-                      >
-                        📥 Export CSV
-                      </button>
-                      <button
-                        onClick={() => handleReportDownload('csr', 'pdf')}
-                        style={{ padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', cursor: 'pointer', backgroundColor: '#fff', fontSize: '12px', fontWeight: '600' }}
-                      >
-                        📄 Download PDF
-                      </button>
-                    </div>
-
-                    {[
-                      { type: 'weekly', title: 'Weekly Operational Audit', desc: 'Summary of 24h average thresholds' },
-                      { type: 'monthly', title: 'Monthly ESG Scorecard', desc: 'Targeting SDG carbon footprint rates' },
-                      { type: 'compliance', title: 'EPA Regulatory Compliance', desc: 'Verification of pH, TDS & PM boundaries' }
-                    ].map(rep => (
-                      <div
-                        key={rep.type}
-                        onClick={() => handleReportDownload(rep.type, 'pdf')}
-                        style={{
-                          border: '1px solid var(--color-border)',
-                          borderRadius: '8px',
-                          padding: '10px',
-                          cursor: 'pointer',
-                          backgroundColor: '#FAFAFA',
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          transition: 'background-color 0.15s'
-                        }}
-                        onMouseOver={e => e.currentTarget.style.backgroundColor = '#F1F5F9'}
-                        onMouseOut={e => e.currentTarget.style.backgroundColor = '#FAFAFA'}
-                      >
-                        <div>
-                          <div style={{ fontSize: '12px', fontWeight: '700', color: 'var(--color-text-primary)' }}>{rep.title}</div>
-                          <div style={{ fontSize: '10px', color: 'var(--color-text-secondary)', marginTop: '2px' }}>{rep.desc}</div>
-                        </div>
-                        <span style={{ fontSize: '16px' }}>⚡</span>
+              {/* ── SAFETY TAB ── */}
+              {activeTab === 'safety' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                    {/* Active Alerts */}
+                    <motion.div
+                      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+                      style={{
+                        background: 'linear-gradient(135deg, rgba(15,23,42,0.98), rgba(30,41,59,0.95))',
+                        border: activeAlerts.length > 0 ? '1px solid rgba(239,68,68,0.25)' : '1px solid rgba(16,185,129,0.15)',
+                        borderRadius: '16px', padding: '24px',
+                        boxShadow: activeAlerts.length > 0 ? '0 8px 32px rgba(239,68,68,0.1)' : '0 8px 32px rgba(0,0,0,0.4)',
+                        display: 'flex', flexDirection: 'column', gap: '14px',
+                      }}
+                    >
+                      <div style={{ fontSize: '14px', fontWeight: '700', color: '#F8FAFC', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <motion.span animate={activeAlerts.length > 0 ? { scale: [1, 1.15, 1] } : {}} transition={{ duration: 1, repeat: Infinity }}>
+                          🚨
+                        </motion.span>
+                        Active Alert Center
+                        {activeAlerts.length > 0 && (
+                          <span style={{ marginLeft: 'auto', fontSize: '10px', background: 'rgba(239,68,68,0.2)', color: '#EF4444', border: '1px solid rgba(239,68,68,0.3)', padding: '2px 8px', borderRadius: '10px', fontWeight: '800' }}>
+                            {activeAlerts.length} ACTIVE
+                          </span>
+                        )}
                       </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Sensor Health Monitoring */}
-                {sensorHealth && (
-                  <SensorHealthMonitor data={sensorHealth} />
-                )}
-              </div>
-
-              {/* Raw / Synthetic Telemetry Database Table */}
-              <div style={{
-                backgroundColor: '#fff',
-                border: '1px solid var(--color-border)',
-                borderRadius: '12px',
-                padding: '20px',
-                boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <div>
-                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '700' }}>📊 Historical Telemetry Logger</h3>
-                    <p style={{ margin: '2px 0 0 0', fontSize: '11px', color: 'var(--color-text-secondary)' }}>
-                      Raw synthetic telemetry logs for all monitored indicators
-                    </p>
-                  </div>
-                  <span style={{ fontSize: '11px', backgroundColor: '#F1F5F9', color: '#475569', padding: '4px 8px', borderRadius: '4px', fontFamily: 'var(--font-mono)' }}>
-                    Total: {readings.length} records loaded
-                  </span>
-                </div>
-
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px', textAlign: 'left' }}>
-                    <thead>
-                      <tr style={{ backgroundColor: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-                        <th style={{ padding: '10px 12px', fontWeight: '600', color: '#475569' }}>Timestamp</th>
-                        <th style={{ padding: '10px 12px', fontWeight: '600', color: '#475569' }}>AQI</th>
-                        <th style={{ padding: '10px 12px', fontWeight: '600', color: '#475569' }}>PM2.5</th>
-                        <th style={{ padding: '10px 12px', fontWeight: '600', color: '#475569' }}>PM10</th>
-                        <th style={{ padding: '10px 12px', fontWeight: '600', color: '#475569' }}>WQI</th>
-                        <th style={{ padding: '10px 12px', fontWeight: '600', color: '#475569' }}>pH</th>
-                        <th style={{ padding: '10px 12px', fontWeight: '600', color: '#475569' }}>TDS</th>
-                        <th style={{ padding: '10px 12px', fontWeight: '600', color: '#475569' }}>DO</th>
-                        <th style={{ padding: '10px 12px', fontWeight: '600', color: '#475569' }}>Turbidity</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {readings.slice(-15).reverse().map((r, idx) => (
-                        <tr key={idx} style={{ borderBottom: idx < 14 ? '1px solid #F1F5F9' : 'none' }}>
-                          <td style={{ padding: '10px 12px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: '#64748B' }}>
-                            {new Date(r.timestamp).toLocaleString()}
-                          </td>
-                          <td style={{ padding: '10px 12px', fontWeight: '700', color: r.AQI > 100 ? '#EF4444' : 'inherit' }}>{r.AQI}</td>
-                          <td style={{ padding: '10px 12px' }}>{r.PM25}</td>
-                          <td style={{ padding: '10px 12px' }}>{r.PM10}</td>
-                          <td style={{ padding: '10px 12px', fontWeight: '700', color: r.water_status === 'UNSAFE' ? '#EF4444' : 'inherit' }}>{r.WQI}</td>
-                          <td style={{ padding: '10px 12px' }}>{r.pH}</td>
-                          <td style={{ padding: '10px 12px' }}>{r.TDS}</td>
-                          <td style={{ padding: '10px 12px' }}>{r.DO}</td>
-                          <td style={{ padding: '10px 12px' }}>{r.turbidity}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'safety' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
-                {/* Active Alerts Logs */}
-                <div style={{
-                  backgroundColor: '#fff',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: '12px',
-                  padding: '20px',
-                  boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '16px',
-                  minHeight: '340px'
-                }}>
-                  <div>
-                    <div style={{ fontSize: '15px', fontWeight: '700', color: 'var(--color-text-primary)' }}>
-                      🚨 Active Alerts Center
-                    </div>
-                    <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
-                      Real-time critical incidents across all arrays
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', overflowY: 'auto', maxHeight: '230px' }}>
-                    {activeAlerts.length === 0 ? (
-                      <div style={{ textAlign: 'center', color: 'var(--color-text-secondary)', padding: '50px 0', fontSize: '13px' }}>
-                        ✓ All systems operating within normal parameters.
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', maxHeight: '260px' }}>
+                        {activeAlerts.length === 0 ? (
+                          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                            style={{ textAlign: 'center', color: '#10B981', padding: '40px 0', fontSize: '13px' }}>
+                            <div style={{ fontSize: '36px', marginBottom: '8px' }}>✅</div>
+                            All systems operating normally
+                          </motion.div>
+                        ) : (
+                          activeAlerts.map((alert, i) => (
+                            <motion.div key={alert.id}
+                              initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }}
+                              transition={{ delay: i * 0.06 }}
+                              style={{
+                                padding: '10px 14px', borderRadius: '10px',
+                                background: alert.type === 'Critical' ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.08)',
+                                borderLeft: `3px solid ${alert.type === 'Critical' ? '#EF4444' : '#F59E0B'}`,
+                                border: `1px solid ${alert.type === 'Critical' ? 'rgba(239,68,68,0.25)' : 'rgba(245,158,11,0.2)'}`,
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', fontWeight: '800', textTransform: 'uppercase', marginBottom: '4px' }}>
+                                <span style={{ color: alert.type === 'Critical' ? '#EF4444' : '#F59E0B' }}>{alert.type}</span>
+                                <span style={{ color: '#334155', fontFamily: 'monospace' }}>LIVE</span>
+                              </div>
+                              <div style={{ fontSize: '12px', color: '#F1F5F9', fontWeight: '500' }}>{alert.msg}</div>
+                            </motion.div>
+                          ))
+                        )}
                       </div>
-                    ) : (
-                      activeAlerts.map(alert => (
-                        <div key={alert.id} style={{
-                          padding: '10px 12px',
-                          borderRadius: '8px',
-                          backgroundColor: alert.type === 'Critical' ? '#FEF2F2' : '#FFFBEB',
-                          borderLeft: `4px solid ${alert.type === 'Critical' ? '#EF4444' : '#F59E0B'}`,
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '4px'
-                        }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: '700', textTransform: 'uppercase' }}>
-                            <span style={{ color: alert.type === 'Critical' ? '#EF4444' : '#B45309' }}>{alert.type} Alert</span>
-                            <span style={{ color: 'var(--color-text-secondary)', fontFamily: 'var(--font-mono)' }}>Live</span>
-                          </div>
-                          <div style={{ fontSize: '12.5px', color: 'var(--color-text-primary)', fontWeight: '500' }}>
-                            {alert.msg}
-                          </div>
-                        </div>
-                      ))
-                    )}
+                    </motion.div>
+                    <SustainabilityScorecard />
                   </div>
-                </div>
 
-                {/* Sustainability ESG Scorecard */}
-                <SustainabilityScorecard />
-              </div>
+                  {/* Admin Panel */}
+                  <AdminPanel onConfigChange={handleConfigChange} />
 
-              {/* Admin Panel Simulation Controls */}
-              <div style={{
-                backgroundColor: '#fff',
-                border: '1px solid var(--color-border)',
-                borderRadius: '12px',
-                padding: '20px',
-                boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)'
-              }}>
-                <h3 style={{ margin: '0 0 16px 0', fontSize: '15px', fontWeight: '700' }}>⚙️ Hackathon Overrides & Simulation Panel</h3>
-                <AdminPanel onConfigChange={handleConfigChange} />
-              </div>
-
-              {/* AI observations feed */}
-              {aiInsights.length > 0 && (
-                <div style={{
-                  backgroundColor: '#1E293B',
-                  border: '1px solid #334155',
-                  borderRadius: '12px',
-                  padding: '16px 20px',
-                  boxShadow: '0 4px 10px rgba(0,0,0,0.15)',
-                  color: '#fff',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '12px'
-                }}>
-                  <div style={{ fontSize: '13px', fontWeight: '700', letterSpacing: '0.04em', color: '#38BDF8', textTransform: 'uppercase' }}>
-                    ✦ AI Insights Timeline & Activity Feed
-                  </div>
-                  
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {aiInsights.map((insight, idx) => (
-                      <div key={idx} style={{ display: 'flex', gap: '12px', fontSize: '13px', borderBottom: idx < aiInsights.length - 1 ? '1px dashed #334155' : 'none', paddingBottom: '8px', alignItems: 'center' }}>
-                        <span style={{ fontFamily: 'var(--font-mono)', color: '#64748B', fontWeight: '700', flexShrink: 0 }}>
-                          {insight.time}
-                        </span>
-                        <span style={{
-                          padding: '1px 6px',
-                          borderRadius: '4px',
-                          fontSize: '10px',
-                          fontWeight: '700',
-                          backgroundColor: insight.severity === 'CRITICAL' ? 'rgba(239, 68, 68, 0.2)' : (insight.severity === 'WARNING' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(56, 189, 248, 0.2)'),
-                          color: insight.severity === 'CRITICAL' ? '#EF4444' : (insight.severity === 'WARNING' ? '#F59E0B' : '#38BDF8'),
-                          textTransform: 'uppercase',
-                          flexShrink: 0
-                        }}>
-                          {insight.severity}
-                        </span>
-                        <span style={{ fontWeight: '600', color: '#94A3B8', flexShrink: 0 }}>
-                          [{insight.location}]
-                        </span>
-                        <span style={{ color: '#F8FAFC' }}>
-                          {insight.message}
-                        </span>
+                  {/* AI Timeline */}
+                  {aiInsights.length > 0 && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+                      style={{
+                        background: 'linear-gradient(135deg, rgba(15,23,42,0.98), rgba(30,41,59,0.95))',
+                        border: '1px solid rgba(56,189,248,0.12)',
+                        borderRadius: '16px', padding: '20px',
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                      }}
+                    >
+                      <div style={{ fontSize: '12px', fontWeight: '700', color: '#38BDF8', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '14px' }}>
+                        ✦ AI Insights Timeline
                       </div>
-                    ))}
-                  </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {aiInsights.map((insight, idx) => (
+                          <motion.div key={idx}
+                            initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: idx * 0.04 }}
+                            style={{ display: 'flex', gap: '12px', fontSize: '12px', borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '8px', alignItems: 'center' }}
+                          >
+                            <span style={{ fontFamily: 'monospace', color: '#334155', fontWeight: '700', flexShrink: 0 }}>{insight.time}</span>
+                            <span style={{
+                              padding: '1px 7px', borderRadius: '4px', fontSize: '9px', fontWeight: '800', flexShrink: 0,
+                              background: insight.severity === 'CRITICAL' ? 'rgba(239,68,68,0.15)' : insight.severity === 'WARNING' ? 'rgba(245,158,11,0.15)' : 'rgba(56,189,248,0.12)',
+                              color: insight.severity === 'CRITICAL' ? '#EF4444' : insight.severity === 'WARNING' ? '#F59E0B' : '#38BDF8',
+                              border: `1px solid ${insight.severity === 'CRITICAL' ? 'rgba(239,68,68,0.3)' : insight.severity === 'WARNING' ? 'rgba(245,158,11,0.25)' : 'rgba(56,189,248,0.2)'}`,
+                              textTransform: 'uppercase',
+                            }}>
+                              {insight.severity}
+                            </span>
+                            <span style={{ color: '#475569', fontWeight: '600', flexShrink: 0 }}>[{insight.location}]</span>
+                            <span style={{ color: '#94A3B8' }}>{insight.message}</span>
+                          </motion.div>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
                 </div>
               )}
-            </div>
-          )}
 
+            </motion.div>
+          </AnimatePresence>
         </main>
       </div>
 
-      {/* Floating assistant bot */}
       <ChatWidget selectedLocation={selectedLocation} />
     </div>
   );
