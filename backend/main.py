@@ -1138,3 +1138,313 @@ def sandbox_predict_water(request: WaterSandboxRequest):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+# ============================================================
+# AIRSENSE AI — NEW HACKATHON ENDPOINTS
+# Problem Statement 5: AI-Powered Urban Air Quality Intelligence
+# ============================================================
+
+@app.get("/api/air/city-overview")
+def get_city_overview():
+    """Returns city-wide AQI summary, worst zones, and overall pollution health score."""
+    if not ALL_DATA:
+        raise HTTPException(status_code=503, detail="Dataset not loaded")
+
+    unique_names = sorted(list(set(r["location"] for r in ALL_DATA)))
+    zone_data = []
+
+    for name in unique_names:
+        records = get_location_data(name)
+        if not records:
+            continue
+        latest = records[-1]
+        aqi = latest["AQI"]
+        if aqi <= 50:   cat, color = "Good", "green"
+        elif aqi <= 100: cat, color = "Moderate", "yellow"
+        elif aqi <= 150: cat, color = "Sensitive", "orange"
+        elif aqi <= 200: cat, color = "Unhealthy", "red"
+        else:            cat, color = "Hazardous", "purple"
+
+        zone_data.append({
+            "name": name,
+            "latitude": latest["latitude"],
+            "longitude": latest["longitude"],
+            "sector_type": latest["sector_type"],
+            "aqi": aqi,
+            "pm25": latest["PM25"],
+            "pm10": latest["PM10"],
+            "no2": latest["NO2"],
+            "so2": latest["SO2"],
+            "co": latest["CO"],
+            "wind_speed": latest["wind_speed"],
+            "temperature": latest["air_temperature"],
+            "humidity": latest["humidity"],
+            "traffic_index": latest["traffic_index"],
+            "weather": latest["weather_condition"],
+            "category": cat,
+            "color": color,
+            "sensor_status": latest["sensor_status"],
+        })
+
+    aqis = [z["aqi"] for z in zone_data]
+    avg_aqi = round(statistics.mean(aqis), 1) if aqis else 0
+    worst = sorted(zone_data, key=lambda x: x["aqi"], reverse=True)[:5]
+    critical_count = sum(1 for z in zone_data if z["aqi"] > 150)
+    city_score = max(0, round(100 - (avg_aqi / 4), 1))
+
+    return {
+        "zones": zone_data,
+        "city_avg_aqi": avg_aqi,
+        "city_score": city_score,
+        "critical_zones": critical_count,
+        "worst_zones": worst,
+        "total_zones": len(zone_data),
+    }
+
+
+@app.get("/api/air/health-advisory")
+def get_health_advisory(location: str = "Sector A"):
+    """Generates citizen health advisory for the location based on current AQI."""
+    records = get_location_data(location)
+    if not records:
+        raise HTTPException(status_code=404, detail="Location not found")
+
+    latest = records[-1]
+    aqi = latest["AQI"]
+    pm25 = latest["PM25"]
+
+    # Sensitive group advisories
+    advisories = []
+
+    if aqi <= 50:
+        level = "Good"; color = "#10B981"; emoji = "✅"
+        advisories = [
+            {"group": "General Public", "icon": "👥", "advice": "Air quality is satisfactory. Enjoy outdoor activities freely.", "risk": "None"},
+            {"group": "Schools & Children", "icon": "🏫", "advice": "Safe for outdoor PE and sports activities.", "risk": "None"},
+            {"group": "Elderly & Seniors", "icon": "👴", "advice": "Normal outdoor activity. No restrictions needed.", "risk": "None"},
+            {"group": "Respiratory Patients", "icon": "🫁", "advice": "Continue regular medication. No additional precautions needed.", "risk": "Low"},
+        ]
+    elif aqi <= 100:
+        level = "Moderate"; color = "#F59E0B"; emoji = "⚠️"
+        advisories = [
+            {"group": "General Public", "icon": "👥", "advice": "Acceptable air quality. Unusually sensitive people should limit prolonged outdoor exertion.", "risk": "Low"},
+            {"group": "Schools & Children", "icon": "🏫", "advice": "Reduce prolonged heavy exertion outdoors. Watch for symptoms like coughing.", "risk": "Moderate"},
+            {"group": "Elderly & Seniors", "icon": "👴", "advice": "Limit prolonged outdoor activities. Stay hydrated.", "risk": "Moderate"},
+            {"group": "Respiratory Patients", "icon": "🫁", "advice": "Carry inhaler. Reduce outdoor exposure duration. Monitor symptoms closely.", "risk": "Moderate"},
+            {"group": "Heart Disease Patients", "icon": "❤️", "advice": "Avoid strenuous outdoor activities. Consult doctor if symptoms arise.", "risk": "Moderate"},
+        ]
+    elif aqi <= 150:
+        level = "Unhealthy for Sensitive"; color = "#F97316"; emoji = "🔶"
+        advisories = [
+            {"group": "General Public", "icon": "👥", "advice": "Wear N95 mask for prolonged outdoor exposure. Limit outdoor time.", "risk": "Moderate"},
+            {"group": "Schools & Children", "icon": "🏫", "advice": "Restrict outdoor PE classes. Keep windows closed in classrooms.", "risk": "High"},
+            {"group": "Elderly & Seniors", "icon": "👴", "advice": "Stay indoors as much as possible. Use air purifiers if available.", "risk": "High"},
+            {"group": "Respiratory Patients", "icon": "🫁", "advice": "Avoid all outdoor activities. Ensure medication is handy. Consider emergency consultation.", "risk": "High"},
+            {"group": "Hospitals", "icon": "🏥", "advice": "Alert emergency rooms to expect respiratory admissions. Increase ventilation checks.", "risk": "High"},
+        ]
+    elif aqi <= 200:
+        level = "Unhealthy"; color = "#EF4444"; emoji = "🔴"
+        advisories = [
+            {"group": "General Public", "icon": "👥", "advice": "AVOID outdoor activities. Wear masks. Close all windows. Use air purifiers.", "risk": "High"},
+            {"group": "Schools & Children", "icon": "🏫", "advice": "CANCEL all outdoor activities. Consider closing schools if AQI persists.", "risk": "Critical"},
+            {"group": "Elderly & Seniors", "icon": "👴", "advice": "STAY INDOORS. Seek medical advice immediately if experiencing symptoms.", "risk": "Critical"},
+            {"group": "Respiratory Patients", "icon": "🫁", "advice": "EMERGENCY ALERT: Avoid all exposure. Call doctor. Go to hospital if breathing difficulty.", "risk": "Critical"},
+            {"group": "Hospitals", "icon": "🏥", "advice": "Activate emergency respiratory protocols. Increase ICU capacity for pollution-related cases.", "risk": "Critical"},
+            {"group": "Asthma Patients", "icon": "💊", "advice": "Do NOT go outside. Use rescue inhaler. Call emergency services if symptoms worsen.", "risk": "Critical"},
+        ]
+    else:
+        level = "Hazardous"; color = "#7C3AED"; emoji = "☠️"
+        advisories = [
+            {"group": "All Residents", "icon": "👥", "advice": "EMERGENCY: Stay indoors with all windows and doors sealed. This is a public health emergency.", "risk": "Critical"},
+            {"group": "Schools", "icon": "🏫", "advice": "IMMEDIATE CLOSURE REQUIRED. Evacuate all students indoors or to safe zones.", "risk": "Critical"},
+            {"group": "Hospitals", "icon": "🏥", "advice": "Mass casualty protocol activated. Prepare for respiratory emergency surge.", "risk": "Critical"},
+            {"group": "City Authorities", "icon": "🏛️", "advice": "Issue emergency public health order. Halt all vehicle traffic. Activate smog emergency response.", "risk": "Critical"},
+        ]
+
+    # Health impact estimates
+    pm25_health_impact = "Low risk" if pm25 < 12 else ("Moderate risk" if pm25 < 35 else ("High risk" if pm25 < 55 else "Very high risk"))
+
+    return {
+        "location": location,
+        "aqi": aqi,
+        "level": level,
+        "color": color,
+        "emoji": emoji,
+        "pm25": pm25,
+        "pm25_health_impact": pm25_health_impact,
+        "advisories": advisories,
+        "emergency": aqi > 200,
+        "mask_required": aqi > 100,
+        "outdoor_restriction": aqi > 150,
+    }
+
+
+@app.get("/api/air/multi-city")
+def get_multi_city():
+    """Returns comparative AQI analytics across all monitored zones for multi-city comparison."""
+    if not ALL_DATA:
+        raise HTTPException(status_code=503, detail="Dataset not loaded")
+
+    unique_names = sorted(list(set(r["location"] for r in ALL_DATA)))
+    comparison = []
+
+    for name in unique_names:
+        records = get_location_data(name)
+        if not records or len(records) < 2:
+            continue
+        latest = records[-1]
+        prev = records[-2] if len(records) >= 2 else records[-1]
+        last_24 = records[-24:]
+
+        aqis_24h = [r["AQI"] for r in last_24]
+        avg_24h = round(statistics.mean(aqis_24h), 1) if aqis_24h else 0
+        trend = "improving" if latest["AQI"] < prev["AQI"] else ("worsening" if latest["AQI"] > prev["AQI"] else "stable")
+        peak_aqi = max(aqis_24h) if aqis_24h else 0
+
+        comparison.append({
+            "name": name,
+            "sector_type": latest["sector_type"],
+            "current_aqi": latest["AQI"],
+            "avg_24h_aqi": avg_24h,
+            "peak_24h_aqi": peak_aqi,
+            "trend": trend,
+            "pm25": latest["PM25"],
+            "dominant_pollutant": "PM2.5" if latest["PM25"] > 25 else ("PM10" if latest["PM10"] > 50 else ("NO2" if latest["NO2"] > 40 else "CO")),
+            "latitude": latest["latitude"],
+            "longitude": latest["longitude"],
+        })
+
+    # Sort by current AQI descending for ranking
+    comparison.sort(key=lambda x: x["current_aqi"], reverse=True)
+
+    return {
+        "cities": comparison,
+        "most_polluted": comparison[0] if comparison else None,
+        "cleanest": comparison[-1] if comparison else None,
+        "total_compared": len(comparison),
+    }
+
+
+@app.get("/api/air/intervention-plan")
+def get_intervention_plan(location: str = "Sector A"):
+    """Returns a detailed AI-generated intervention action plan with department assignments and timelines."""
+    records = get_location_data(location)
+    if not records:
+        raise HTTPException(status_code=404, detail="Location not found")
+
+    latest = records[-1]
+    aqi = latest["AQI"]
+    sector = latest["sector_type"]
+    pm25 = latest["PM25"]
+    traffic = latest["traffic_index"]
+
+    actions = []
+
+    # Immediate (0-2 hours)
+    if aqi > 150 or pm25 > 55:
+        actions.append({"id": "I1", "timeframe": "Immediate (0-2h)", "priority": "Critical",
+            "action": "Issue Emergency Public Health Notification",
+            "department": "Health Dept & Municipal Corp",
+            "impact": "Notifies 50,000+ residents via SMS and app alerts",
+            "status": "AUTO-TRIGGERED", "color": "#EF4444"})
+
+    if traffic > 75 or sector == "Traffic Hub":
+        actions.append({"id": "I2", "timeframe": "Immediate (0-2h)", "priority": "Critical",
+            "action": "Activate Odd-Even Vehicle Restriction on Ring Road",
+            "department": "Traffic Police Department",
+            "impact": "Reduces vehicular PM2.5 contribution by ~30%",
+            "status": "RECOMMENDED", "color": "#EF4444"})
+
+    if sector == "Industrial" or latest["SO2"] > 40:
+        actions.append({"id": "I3", "timeframe": "Immediate (0-2h)", "priority": "Critical",
+            "action": "Suspend High-Emission Industrial Units (Category A)",
+            "department": "Pollution Control Board",
+            "impact": "Cuts SO2 and NO2 levels by up to 45%",
+            "status": "RECOMMENDED", "color": "#EF4444"})
+
+    # Short-term (2-6 hours)
+    actions.append({"id": "S1", "timeframe": "Short-term (2-6h)", "priority": "High",
+        "action": "Deploy Anti-Smog Water Spraying Fleet (12 trucks)",
+        "department": "Public Works Department",
+        "impact": "Reduces PM10 ground concentration by 18-25%",
+        "status": "SCHEDULED", "color": "#F97316"})
+
+    if sector in ["Construction Area", "Industrial"]:
+        actions.append({"id": "S2", "timeframe": "Short-term (2-6h)", "priority": "High",
+            "action": "Halt Open Construction Sites — Mandate Dust Suppression Nets",
+            "department": "Municipal Corporation",
+            "impact": "Eliminates 15-20% construction PM10 source",
+            "status": "RECOMMENDED", "color": "#F97316"})
+
+    actions.append({"id": "S3", "timeframe": "Short-term (2-6h)", "priority": "High",
+        "action": "Increase Metro & Public Bus Frequency by 40%",
+        "department": "City Transport Authority",
+        "impact": "Reduces private vehicle count; lowers traffic index by 12%",
+        "status": "RECOMMENDED", "color": "#F97316"})
+
+    # Medium-term (6-24 hours)
+    actions.append({"id": "M1", "timeframe": "Medium-term (6-24h)", "priority": "Medium",
+        "action": "Environmental Inspection at Identified Industrial Hotspots",
+        "department": "Environmental Protection Agency",
+        "impact": "Identifies and fines non-compliant emission sources",
+        "status": "SCHEDULED", "color": "#F59E0B"})
+
+    actions.append({"id": "M2", "timeframe": "Medium-term (6-24h)", "priority": "Medium",
+        "action": "Street Mechanised Sweeping on High-Traffic Corridors",
+        "department": "Municipal Sanitation Division",
+        "impact": "Removes settled PM10 before re-suspension",
+        "status": "ROUTINE", "color": "#F59E0B"})
+
+    # Preventive
+    actions.append({"id": "P1", "timeframe": "Preventive (ongoing)", "priority": "Low",
+        "action": "Real-Time AQI Sensor Calibration & Maintenance Check",
+        "department": "IoT Operations Team",
+        "impact": "Ensures data accuracy within ±5% tolerance",
+        "status": "ROUTINE", "color": "#10B981"})
+
+    return {
+        "location": location,
+        "current_aqi": aqi,
+        "sector": sector,
+        "intervention_level": "Emergency" if aqi > 200 else ("High Alert" if aqi > 150 else ("Moderate" if aqi > 100 else "Routine")),
+        "actions": actions,
+        "total_actions": len(actions),
+        "auto_triggered": sum(1 for a in actions if a["status"] == "AUTO-TRIGGERED"),
+    }
+
+
+@app.get("/api/air/ward-comparison")
+def get_ward_comparison():
+    """Returns AQI ranking and trend for all monitored wards/zones."""
+    if not ALL_DATA:
+        raise HTTPException(status_code=503, detail="Dataset not loaded")
+
+    unique_names = sorted(list(set(r["location"] for r in ALL_DATA)))
+    wards = []
+
+    for name in unique_names:
+        records = get_location_data(name)
+        if not records:
+            continue
+        latest = records[-1]
+        last_24 = records[-24:]
+        hourly_aqis = [{"hour": i, "aqi": r["AQI"]} for i, r in enumerate(last_24)]
+
+        wards.append({
+            "name": name,
+            "aqi": latest["AQI"],
+            "pm25": latest["PM25"],
+            "no2": latest["NO2"],
+            "sector_type": latest["sector_type"],
+            "trend": hourly_aqis,
+            "status": "Critical" if latest["AQI"] > 150 else ("Moderate" if latest["AQI"] > 100 else "Good"),
+        })
+
+    wards.sort(key=lambda x: x["aqi"], reverse=True)
+    return {"wards": wards}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
