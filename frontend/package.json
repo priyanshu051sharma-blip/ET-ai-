@@ -11,10 +11,13 @@
   },
   "dependencies": {
     "axios": "^1.18.1",
+    "framer-motion": "^11.18.2",
     "leaflet": "^1.9.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "recharts": "^3.9.1"
+    "react-is": "^19.2.7",
+    "recharts": "^3.9.1",
+    "three": "^0.170.0"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",
