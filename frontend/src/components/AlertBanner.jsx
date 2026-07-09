@@ -1,50 +1,48 @@
 import React from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 
-/**
- * AlertBanner
- * Props:
- *   show     {boolean} – mount/unmount the banner
- *   title    {string}  – bold headline
- *   message  {string}  – supporting detail text
- */
 export default function AlertBanner({ show, title, message }) {
-  if (!show) return null;
-
   return (
-    <div role="alert" style={{
-      backgroundColor: '#FEF2F2',
-      borderLeft: '4px solid var(--color-risk)',
-      padding: 'var(--space-md) var(--space-lg)',
-      display: 'flex',
-      gap: 'var(--space-sm)',
-      alignItems: 'flex-start',
-      marginBottom: 'var(--space-xl)',
-      /* Spec: no border-radius on alerts */
-      borderRadius: 0,
-    }}>
-      <span style={{ fontSize: '18px', lineHeight: 1.4, flexShrink: 0 }} aria-hidden="true">
-        ⚠️
-      </span>
-      <div>
-        <div style={{
-          fontSize: '15px',
-          fontWeight: '600',
-          color: 'var(--color-risk)',
-          lineHeight: 1.4,
-        }}>
-          {title || 'Water Quality Warning'}
-        </div>
-        {message && (
-          <div style={{
-            fontSize: '14px',
-            color: 'var(--color-text-secondary)',
-            marginTop: '4px',
-            lineHeight: 1.55,
-          }}>
-            {message}
+    <AnimatePresence>
+      {show && (
+        <motion.div
+          role="alert"
+          initial={{ opacity: 0, y: -20, height: 0 }}
+          animate={{ opacity: 1, y: 0, height: 'auto' }}
+          exit={{ opacity: 0, y: -20, height: 0 }}
+          transition={{ duration: 0.35, ease: 'easeOut' }}
+          style={{
+            background: 'linear-gradient(90deg, rgba(239,68,68,0.12), rgba(239,68,68,0.05))',
+            borderLeft: '3px solid #EF4444',
+            padding: '14px 20px',
+            display: 'flex',
+            gap: '12px',
+            alignItems: 'flex-start',
+            marginBottom: '16px',
+            borderRadius: '0 8px 8px 0',
+            boxShadow: '0 0 20px rgba(239,68,68,0.15)',
+            overflow: 'hidden',
+          }}
+        >
+          <motion.span
+            animate={{ rotate: [0, -5, 5, -5, 0] }}
+            transition={{ duration: 0.5, delay: 0.3 }}
+            style={{ fontSize: '18px', lineHeight: 1.4, flexShrink: 0 }}
+          >
+            ⚠️
+          </motion.span>
+          <div>
+            <div style={{ fontSize: '14px', fontWeight: '700', color: '#EF4444', lineHeight: 1.4 }}>
+              {title || 'Water Quality Warning'}
+            </div>
+            {message && (
+              <div style={{ fontSize: '13px', color: 'rgba(148,163,184,0.9)', marginTop: '4px', lineHeight: 1.55 }}>
+                {message}
+              </div>
+            )}
           </div>
-        )}
-      </div>
-    </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

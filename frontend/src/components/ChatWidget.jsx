@@ -1,40 +1,21 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { sendChatMessage } from '../data/api';
 
-/**
- * ChatWidget
- * Floating chat assistant powered by the backend /api/chat endpoint.
- */
 export default function ChatWidget({ selectedLocation }) {
-  const [open, setOpen]       = useState(false);
-  const [messages, setMsgs]   = useState([{
+  const [open, setOpen] = useState(false);
+  const [messages, setMsgs] = useState([{
     role: 'assistant',
-    text: `Hello! I am EcoSphere AI. Ask me about air quality indices (AQI), water quality (WQI), active alerts, or sustainability guidelines for ${selectedLocation || 'the campus'}.`,
+    text: `Hello! I'm EcoSphere AI. Ask me about air quality, water safety, alerts, or forecasts for ${selectedLocation || 'the network'}.`,
   }]);
-  const [input, setInput]     = useState('');
+  const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [unread, setUnread]   = useState(0);
-
-  const endRef   = useRef(null);
+  const [unread, setUnread] = useState(0);
+  const endRef = useRef(null);
   const inputRef = useRef(null);
 
-  // Sync initial message when selectedLocation changes
   useEffect(() => {
-    if (messages.length === 1) {
-      setMsgs([{
-        role: 'assistant',
-        text: `Hello! I am EcoSphere AI. Ask me about air quality indices (AQI), water quality (WQI), active alerts, or sustainability guidelines for ${selectedLocation || 'the campus'}.`,
-      }]);
-    }
-  }, [selectedLocation]);
-
-  // Scroll to bottom whenever messages change
-  useEffect(() => {
-    if (open) {
-      endRef.current?.scrollIntoView({ behavior: 'smooth' });
-      setUnread(0);
-      setTimeout(() => inputRef.current?.focus(), 80);
-    }
+    if (open) { endRef.current?.scrollIntoView({ behavior: 'smooth' }); setUnread(0); setTimeout(() => inputRef.current?.focus(), 80); }
   }, [messages, open]);
 
   const send = async () => {
@@ -44,272 +25,157 @@ export default function ChatWidget({ selectedLocation }) {
     setInput('');
     setLoading(true);
     try {
-      const reply = await sendChatMessage(text);
+      const reply = await sendChatMessage(text, selectedLocation);
       setMsgs(prev => [...prev, { role: 'assistant', text: reply }]);
       if (!open) setUnread(c => c + 1);
     } catch {
-      setMsgs(prev => [...prev, {
-        role: 'assistant',
-        text: 'Unable to reach the assistant. Please check that the backend server is running.',
-      }]);
-    } finally {
-      setLoading(false);
-    }
+      setMsgs(prev => [...prev, { role: 'assistant', text: 'Unable to reach the assistant.' }]);
+    } finally { setLoading(false); }
   };
-
-  const PANEL_W = 356;
-  const MSG_RADIUS_USER = '12px 12px 3px 12px';
-  const MSG_RADIUS_BOT  = '12px 12px 12px 3px';
 
   return (
     <>
-      {/* Chat panel */}
-      <div
-        role="dialog"
-        aria-label="EcoSphere AI assistant"
-        aria-modal="true"
-        aria-hidden={!open}
-        style={{
-          position: 'fixed',
-          bottom: '80px',
-          right: '24px',
-          width: `${PANEL_W}px`,
-          height: '472px',
-          backgroundColor: '#fff',
-          border: '1px solid var(--color-border)',
-          borderRadius: '12px',
-          boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-          zIndex: 1000,
-          transformOrigin: 'bottom right',
-          transform: open ? 'translateY(0) scale(1)' : 'translateY(10px) scale(0.97)',
-          opacity: open ? 1 : 0,
-          pointerEvents: open ? 'all' : 'none',
-          transition: 'transform 0.18s ease, opacity 0.15s ease',
-        }}
-      >
-        {/* Header */}
-        <div style={{
-          backgroundColor: '#0F172A',
-          height: '52px',
-          padding: '0 var(--space-md)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexShrink: 0,
-          borderBottom: '1px solid #1E293B'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
-            {/* Logo */}
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            role="dialog" aria-label="EcoSphere AI assistant"
+            initial={{ opacity: 0, scale: 0.95, y: 16 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 16 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            style={{
+              position: 'fixed', bottom: '88px', right: '24px',
+              width: '360px', height: '480px',
+              background: 'linear-gradient(135deg, rgba(15,23,42,0.98), rgba(30,41,59,0.96))',
+              border: '1px solid rgba(56,189,248,0.2)',
+              borderRadius: '16px',
+              boxShadow: '0 24px 64px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04)',
+              display: 'flex', flexDirection: 'column', overflow: 'hidden',
+              zIndex: 1000, backdropFilter: 'blur(20px)',
+            }}
+          >
+            {/* Header */}
             <div style={{
-              width: '28px', height: '28px',
-              border: '1.5px solid #38BDF8',
-              borderRadius: '6px',
-              backgroundColor: 'rgba(56, 189, 248, 0.08)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '12px', fontWeight: '800',
-              color: '#38BDF8', flexShrink: 0,
+              background: 'rgba(56,189,248,0.08)',
+              borderBottom: '1px solid rgba(56,189,248,0.12)',
+              height: '52px', padding: '0 16px',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             }}>
-              🌍
-            </div>
-            <div>
-              <div style={{ fontSize: '13px', fontWeight: '700', color: '#fff', lineHeight: 1.2 }}>
-                EcoSphere Assistant
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <motion.div
+                  animate={{ rotateY: [0, 360] }}
+                  transition={{ duration: 8, repeat: Infinity, ease: 'linear' }}
+                  style={{
+                    width: '30px', height: '30px', borderRadius: '8px',
+                    background: 'linear-gradient(135deg, #0ea5e9, #0f3b6f)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '14px', border: '1px solid rgba(56,189,248,0.3)',
+                    boxShadow: '0 0 12px rgba(56,189,248,0.3)',
+                  }}
+                >🌍</motion.div>
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: '700', color: '#F8FAFC' }}>EcoSphere Assistant</div>
+                  <div style={{ fontSize: '9px', color: '#475569' }}>AI Environmental Copilot</div>
+                </div>
               </div>
-              <div style={{ fontSize: '10px', color: '#64748B', marginTop: '1px' }}>
-                AI Environmental Copilot
-              </div>
+              <motion.button onClick={() => setOpen(false)} whileHover={{ scale: 1.1 }}
+                style={{ background: 'none', border: 'none', color: '#475569', fontSize: '20px', cursor: 'pointer', lineHeight: 1, padding: '4px' }}>
+                ×
+              </motion.button>
             </div>
-          </div>
-          <button
-            onClick={() => setOpen(false)}
-            aria-label="Close chat"
-            style={{
-              background: 'none', border: 'none',
-              color: '#64748B',
-              fontSize: '22px', lineHeight: 1,
-              cursor: 'pointer', padding: '4px 6px',
-              borderRadius: '4px',
-              transition: 'color 0.1s',
-            }}
-            onMouseOver={e => e.currentTarget.style.color = '#fff'}
-            onMouseOut={e  => e.currentTarget.style.color = '#64748B'}
-          >
-            ×
-          </button>
-        </div>
 
-        {/* Messages */}
-        <div style={{
-          flex: 1, overflowY: 'auto',
-          padding: 'var(--space-md)',
-          backgroundColor: '#f8fafc',
-          display: 'flex', flexDirection: 'column',
-          gap: '12px',
-        }}>
-          {messages.map((msg, i) => (
-            <div key={i} style={{
-              display: 'flex',
-              justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
-            }}>
-              <div style={{
-                maxWidth: '82%',
-                backgroundColor: msg.role === 'user' ? '#0F172A' : '#fff',
-                color: msg.role === 'user' ? '#fff' : 'var(--color-text-primary)',
-                padding: '9px 12px',
-                borderRadius: msg.role === 'user' ? MSG_RADIUS_USER : MSG_RADIUS_BOT,
-                fontSize: '13px',
-                lineHeight: 1.55,
-                whiteSpace: 'pre-line',
-                border: msg.role === 'assistant' ? '1px solid var(--color-border)' : 'none',
-                boxShadow: msg.role === 'assistant' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none'
-              }}>
-                {msg.text}
-              </div>
+            {/* Messages */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {messages.map((msg, i) => (
+                <motion.div key={i} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                  style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                  <div style={{
+                    maxWidth: '84%', padding: '9px 13px', fontSize: '12.5px', lineHeight: 1.55, whiteSpace: 'pre-line',
+                    borderRadius: msg.role === 'user' ? '12px 12px 3px 12px' : '12px 12px 12px 3px',
+                    background: msg.role === 'user' ? 'rgba(56,189,248,0.2)' : 'rgba(255,255,255,0.05)',
+                    color: msg.role === 'user' ? '#38BDF8' : '#94A3B8',
+                    border: `1px solid ${msg.role === 'user' ? 'rgba(56,189,248,0.25)' : 'rgba(255,255,255,0.06)'}`,
+                  }}>
+                    {msg.text}
+                  </div>
+                </motion.div>
+              ))}
+              {loading && (
+                <div style={{ display: 'flex', gap: '5px', padding: '8px' }}>
+                  {[0,1,2].map(i => (
+                    <motion.div key={i} animate={{ y: [0, -5, 0] }} transition={{ duration: 0.8, repeat: Infinity, delay: i * 0.15 }}
+                      style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#38BDF8' }} />
+                  ))}
+                </div>
+              )}
+              <div ref={endRef} />
             </div>
-          ))}
 
-          {/* Typing indicator */}
-          {loading && (
-            <div style={{ display: 'flex' }}>
-              <div style={{
-                backgroundColor: '#fff',
-                border: '1px solid var(--color-border)',
-                borderRadius: MSG_RADIUS_BOT,
-                padding: '10px 14px',
-                display: 'flex', gap: '4px', alignItems: 'center',
-              }}>
-                {[0, 1, 2].map(i => (
-                  <span key={i} style={{
-                    width: '5px', height: '5px',
-                    borderRadius: '50%',
-                    backgroundColor: '#64748B',
-                    display: 'inline-block',
-                    animation: `dot-bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
-                  }} />
-                ))}
-              </div>
+            {/* Input */}
+            <div style={{ padding: '10px 14px', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', gap: '8px' }}>
+              <input ref={inputRef} type="text" value={input} onChange={e => setInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && send()}
+                placeholder="Ask about AQI, WQI, forecasts…"
+                disabled={loading}
+                style={{
+                  flex: 1, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '8px', padding: '8px 12px', fontSize: '12.5px', color: '#F8FAFC', outline: 'none',
+                  transition: 'border-color 0.15s',
+                }}
+                onFocus={e => e.target.style.borderColor = '#38BDF8'}
+                onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.1)'}
+              />
+              <motion.button onClick={send} disabled={loading || !input.trim()}
+                whileHover={input.trim() ? { scale: 1.05 } : {}}
+                whileTap={input.trim() ? { scale: 0.95 } : {}}
+                style={{
+                  padding: '8px 14px', fontSize: '13px', fontWeight: '700', border: 'none', borderRadius: '8px',
+                  cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
+                  background: loading || !input.trim() ? 'rgba(255,255,255,0.08)' : 'linear-gradient(135deg, #38BDF8, #0ea5e9)',
+                  color: loading || !input.trim() ? '#475569' : '#0F172A',
+                  transition: 'all 0.15s',
+                }}>
+                →
+              </motion.button>
             </div>
-          )}
-          <div ref={endRef} />
-        </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-        {/* Input row */}
-        <div style={{
-          padding: 'var(--space-sm) var(--space-md)',
-          borderTop: '1px solid var(--color-border)',
-          backgroundColor: '#fff',
-          display: 'flex', gap: 'var(--space-xs)',
-          flexShrink: 0,
-        }}>
-          <input
-            ref={inputRef}
-            id="chat-input"
-            type="text"
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && send()}
-            placeholder="Ask about air/water readings..."
-            disabled={loading}
-            style={{
-              flex: 1,
-              padding: '8px 12px',
-              border: '1px solid var(--color-border)',
-              borderRadius: '6px',
-              fontSize: '13px',
-              fontFamily: 'var(--font-sans)',
-              color: 'var(--color-text-primary)',
-              backgroundColor: '#f8fafc',
-              outline: 'none',
-              transition: 'border-color 0.12s',
-            }}
-            onFocus={e => e.target.style.borderColor = '#38BDF8'}
-            onBlur={e  => e.target.style.borderColor = 'var(--color-border)'}
-          />
-          <button
-            id="chat-send-btn"
-            onClick={send}
-            disabled={loading || !input.trim()}
-            style={{
-              padding: '8px 14px',
-              fontSize: '13px',
-              fontWeight: '600',
-              fontFamily: 'var(--font-sans)',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
-              backgroundColor: loading || !input.trim() ? '#94A3B8' : '#0F172A',
-              color: '#fff',
-              flexShrink: 0,
-              transition: 'background-color 0.12s',
-            }}
-            onMouseOver={e => { if (!loading && input.trim()) e.currentTarget.style.backgroundColor = '#1E293B'; }}
-            onMouseOut={e  => { if (!loading && input.trim()) e.currentTarget.style.backgroundColor = '#0F172A'; }}
-          >
-            Send
-          </button>
-        </div>
-      </div>
-
-      {/* Floating bubble button */}
-      <button
-        id="chat-bubble-btn"
+      {/* Bubble button */}
+      <motion.button
         onClick={() => { setOpen(o => !o); setUnread(0); }}
         aria-label="Open EcoSphere AI assistant"
+        whileHover={{ scale: 1.08 }}
+        whileTap={{ scale: 0.94 }}
+        animate={!open && unread > 0 ? { scale: [1, 1.08, 1] } : {}}
+        transition={{ duration: 1, repeat: unread > 0 ? Infinity : 0 }}
         style={{
-          position: 'fixed',
-          bottom: '24px', right: '24px',
-          width: '56px', height: '56px',
-          borderRadius: '50%',
-          border: 'none',
-          backgroundColor: '#0F172A',
-          color: '#fff',
+          position: 'fixed', bottom: '24px', right: '24px',
+          width: '58px', height: '58px', borderRadius: '50%', border: 'none',
+          background: open ? 'rgba(30,41,59,0.95)' : 'linear-gradient(135deg, #38BDF8, #0ea5e9)',
+          color: open ? '#38BDF8' : '#0F172A',
           cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: '0 4px 12px rgba(15, 23, 42, 0.4)',
+          boxShadow: '0 8px 24px rgba(56,189,248,0.35)',
           zIndex: 1001,
-          transition: 'transform 0.15s, background-color 0.15s',
-        }}
-        onMouseOver={e => {
-          e.currentTarget.style.backgroundColor = '#1E293B';
-          e.currentTarget.style.transform = 'scale(1.05)';
-        }}
-        onMouseOut={e  => {
-          e.currentTarget.style.backgroundColor = '#0F172A';
-          e.currentTarget.style.transform = 'scale(1)';
+          border: '1px solid rgba(56,189,248,0.3)',
         }}
       >
-        {open ? (
-          <span style={{ fontSize: '24px', lineHeight: 1 }}>×</span>
-        ) : (
-          <span style={{ fontSize: '22px' }}>🌍</span>
-        )}
-
+        <span style={{ fontSize: open ? '24px' : '22px', lineHeight: 1 }}>{open ? '×' : '🌍'}</span>
         {unread > 0 && !open && (
-          <span style={{
-            position: 'absolute', top: '2px', right: '2px',
-            width: '16px', height: '16px',
-            borderRadius: '50%',
-            backgroundColor: '#EF4444',
-            color: '#fff',
-            fontSize: '9px', fontWeight: '700',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            border: '2px solid #fff',
-          }}>
+          <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }}
+            style={{
+              position: 'absolute', top: '2px', right: '2px',
+              width: '18px', height: '18px', borderRadius: '50%',
+              background: '#EF4444', color: '#fff', fontSize: '9px', fontWeight: '800',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              border: '2px solid #020817', boxShadow: '0 0 8px #EF4444',
+            }}>
             {unread}
-          </span>
+          </motion.span>
         )}
-      </button>
-
-      {/* Keyframe for typing dots */}
-      <style>{`
-        @keyframes dot-bounce {
-          0%, 60%, 100% { transform: scale(0.7); opacity: 0.4; }
-          30%            { transform: scale(1.0); opacity: 1.0; }
-        }
-      `}</style>
+      </motion.button>
     </>
   );
 }
